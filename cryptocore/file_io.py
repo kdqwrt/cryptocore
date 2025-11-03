@@ -1,25 +1,27 @@
 import os
 
 
-def read_file(file_path: str) -> bytes:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Файл не найден: {file_path}")
-
-    try:
-        with open(file_path, 'rb') as f:
-            return f.read()
-    except IOError as e:
-        raise Exception(f"Ошибка чтения файла: {str(e)}")
+def read_file(filename: str) -> bytes:
+    with open(filename, 'rb') as f:
+        return f.read()
 
 
-def write_file(file_path: str, data: bytes):
-    try:
+def write_file(filename: str, data: bytes):
+    os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.',
+                exist_ok=True)
+    with open(filename, 'wb') as f:
+        f.write(data)
 
-        directory = os.path.dirname(file_path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
 
-        with open(file_path, 'wb') as f:
-            f.write(data)
-    except IOError as e:
-        raise Exception(f"Ошибка записи файла: {str(e)}")
+def read_file_with_iv(filename: str):
+    data = read_file(filename)
+    if len(data) < 16:
+        raise ValueError("File is too short to contain IV (less than 16 bytes)")
+
+    iv = data[:16]
+    actual_data = data[16:]
+    return iv, actual_data
+
+
+def write_file_with_iv(filename: str, iv: bytes, data: bytes):
+    write_file(filename, iv + data)
