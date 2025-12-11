@@ -1,9 +1,48 @@
 import argparse
 import sys
+import os
+from pathlib import Path
 
+try:
+    from .hash.sha256 import SHA256
+    from .hash.sha3_256 import SHA3_256
+    HAS_HASH_MODULES = True
+except ImportError as e:
+    print(f"Warning: Hash modules not found: {e}", file=sys.stderr)
+    HAS_HASH_MODULES = False
+
+try:
+    from .modes.cbc import CBCCipher
+    from .modes.cfb import CFBCipher
+    from .modes.ctr import CTRCipher
+    from .modes.ecb import ECBCipher
+    from .modes.ofb import OFBCipher
+    HAS_ENCRYPTION_MODULES = True
+except ImportError as e:
+    print(f"Warning: Encryption modules not found: {e}", file=sys.stderr)
+    HAS_ENCRYPTION_MODULES = False
+
+try:
+    from .csprng import generate_random_bytes
+    HAS_CSPRNG = True
+except ImportError as e:
+    print(f"Warning: CSPRNG module not found: {e}", file=sys.stderr)
+    HAS_CSPRNG = False
+    import os
+    generate_random_bytes = os.urandom
+
+try:
+    from .file_io import read_file, write_file, read_file_with_iv, write_file_with_iv, read_file_chunks
+    HAS_FILE_IO = True
+except ImportError as e:
+    print(f"Warning: File IO module not found: {e}", file=sys.stderr)
+    HAS_FILE_IO = False
 
 
 def validate_key(key_str: str) -> bytes:
+    if not key_str:
+        return None
+
     if not key_str.startswith('@'):
         raise ValueError("Key must start with @")
 
@@ -17,58 +56,388 @@ def validate_key(key_str: str) -> bytes:
         raise ValueError("Key must be valid hexadecimal")
 
 
-def validate_iv(iv_str: str) -> bytes:
-    if not iv_str:
-        return None
+def check_weak_key(key_bytes: bytes) -> bool:
+    if not key_bytes:
+        return False
 
-    if len(iv_str) != 32:
-        raise ValueError("IV must be 16 bytes (32 hex characters)")
+    if all(byte == 0 for byte in key_bytes):
+        return True
+
+    sequential_up = all(key_bytes[i] == i for i in range(len(key_bytes)))
+    sequential_down = all(key_bytes[i] == (255 - i) for i in range(len(key_bytes)))
+
+    return sequential_up or sequential_down
+
+
+def dgst_command(args):
+    if not HAS_HASH_MODULES:
+        print("Error: Hash modules are not available", file=sys.stderr)
+        return 1
+
+    algorithms = {
+        'sha256': SHA256,
+        'sha3-256': SHA3_256
+    }
+
+    if args.algorithm not in algorithms:
+        print(f"Error: Unsupported algorithm '{args.algorithm}'", file=sys.stderr)
+        print(f"Available algorithms: {', '.join(algorithms.keys())}", file=sys.stderr)
+        return 1
+
+    if args.input != '-' and not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
+        return 1
+
+    if args.input != '-' and not os.path.isfile(args.input):
+        print(f"Error: '{args.input}' is not a file", file=sys.stderr)
+        return 1
 
     try:
-        return bytes.fromhex(iv_str)
-    except ValueError:
-        raise ValueError("IV must be valid hexadecimal")
+        hasher_class = algorithms[args.algorithm]
+        hasher = hasher_class()
+
+        if args.input == '-':
+            while True:
+                chunk = sys.stdin.buffer.read(8192)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+            output_line = hasher.hexdigest()
+        else:
+            if HAS_FILE_IO:
+                for chunk in read_file_chunks(args.input, chunk_size=8192):
+                    hasher.update(chunk)
+            else:
+                with open(args.input, 'rb') as f:
+                    while True:
+                        chunk = f.read(8192)
+                        if not chunk:
+                            break
+                        hasher.update(chunk)
+
+            output_line = f"{hasher.hexdigest()} {args.input}"
+
+        if args.output:
+            try:
+                if args.binary:
+                    if HAS_FILE_IO:
+                        write_file(args.output, hasher.digest())
+                    else:
+                        with open(args.output, 'wb') as out_file:
+                            out_file.write(hasher.digest())
+                else:
+                    output_text = output_line + '\n'
+                    if HAS_FILE_IO:
+                        write_file(args.output, output_text.encode('utf-8'))
+                    else:
+                        with open(args.output, 'w') as out_file:
+                            out_file.write(output_text)
+
+                if not args.quiet:
+                    print(f"Hash written to: {args.output}", file=sys.stderr)
+            except IOError as e:
+                print(f"Error writing to output file: {e}", file=sys.stderr)
+                return 1
+            except PermissionError as e:
+                print(f"Error: Permission denied for output file '{args.output}': {e}", file=sys.stderr)
+                return 1
+        else:
+            if args.binary:
+                sys.stdout.buffer.write(hasher.digest())
+            else:
+                print(output_line)
+
+    except PermissionError as e:
+        print(f"Error: Permission denied for file '{args.input}': {e}", file=sys.stderr)
+        return 1
+    except IOError as e:
+        print(f"Error reading file '{args.input}': {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error during hashing: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def get_cipher_instance(mode: str, key: bytes, iv: bytes = None):
+    if mode == 'ecb':
+        return ECBCipher(key)
+    elif mode == 'cbc':
+        return CBCCipher(key, iv)
+    elif mode == 'cfb':
+        return CFBCipher(key, iv)
+    elif mode == 'ofb':
+        return OFBCipher(key, iv)
+    elif mode == 'ctr':
+        return CTRCipher(key, iv)
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+
+def encrypt_command(args):
+    if not HAS_ENCRYPTION_MODULES:
+        print("Error: Encryption modules are not available", file=sys.stderr)
+        return 1
+
+    if not (args.encrypt ^ args.decrypt):
+        print("Error: Must specify either --encrypt or --decrypt", file=sys.stderr)
+        return 1
+
+    if args.decrypt and not args.key:
+        print("Error: --key is required for decryption", file=sys.stderr)
+        return 1
+
+    key_bytes = None
+    if args.key:
+        try:
+            key_bytes = validate_key(args.key)
+            if check_weak_key(key_bytes):
+                print("Warning: The provided key appears to be weak. Consider using a randomly generated key.",
+                      file=sys.stderr)
+        except ValueError as e:
+            print(f"Error: Invalid key format: {e}", file=sys.stderr)
+            return 1
+
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
+        return 1
+
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        print(f"Error: Output directory '{output_dir}' does not exist", file=sys.stderr)
+        return 1
+
+    try:
+        if args.encrypt:
+            if not key_bytes:
+                key_bytes = generate_random_bytes(16)
+                print(f"Generated key: @{key_bytes.hex()}", file=sys.stderr)
+
+            if args.mode != 'ecb' and args.iv:
+                if not args.quiet:
+                    print("Warning: IV is generated automatically for encryption. Provided IV will be ignored.",
+                          file=sys.stderr)
+
+            if HAS_FILE_IO:
+                plaintext = read_file(args.input)
+            else:
+                with open(args.input, 'rb') as f:
+                    plaintext = f.read()
+
+            cipher = get_cipher_instance(args.mode, key_bytes)
+
+            ciphertext = cipher.encrypt(plaintext)
+
+            if args.mode != 'ecb':
+                if HAS_FILE_IO:
+                    write_file_with_iv(args.output, cipher.iv, ciphertext)
+                else:
+                    with open(args.output, 'wb') as f:
+                        f.write(cipher.iv)
+                        f.write(ciphertext)
+            else:
+                if HAS_FILE_IO:
+                    write_file(args.output, ciphertext)
+                else:
+                    with open(args.output, 'wb') as f:
+                        f.write(ciphertext)
+
+            if not args.quiet:
+                print(f"Success: Encrypted {args.input} -> {args.output}", file=sys.stderr)
+                if args.mode != 'ecb':
+                    print(f"IV (hex): {cipher.iv.hex()}", file=sys.stderr)
+
+            return 0
+
+        else:
+            if not key_bytes:
+                print("Error: Key is required for decryption", file=sys.stderr)
+                return 1
+
+            iv_bytes = None
+            if args.mode != 'ecb':
+                if args.iv:
+                    try:
+                        iv_bytes = bytes.fromhex(args.iv)
+                        if len(iv_bytes) != 16:
+                            print("Error: IV must be 16 bytes (32 hex characters)", file=sys.stderr)
+                            return 1
+                    except ValueError:
+                        print("Error: IV must be valid hexadecimal", file=sys.stderr)
+                        return 1
+                else:
+                    if HAS_FILE_IO:
+                        try:
+                            iv_bytes, ciphertext = read_file_with_iv(args.input)
+                        except ValueError as e:
+                            print(f"Error: {e}", file=sys.stderr)
+                            return 1
+                    else:
+                        with open(args.input, 'rb') as f:
+                            data = f.read()
+                        if len(data) < 16:
+                            print("Error: Input file is too small to contain IV", file=sys.stderr)
+                            return 1
+                        iv_bytes = data[:16]
+                        ciphertext = data[16:]
+            else:
+                if HAS_FILE_IO:
+                    ciphertext = read_file(args.input)
+                else:
+                    with open(args.input, 'rb') as f:
+                        ciphertext = f.read()
+
+            cipher = get_cipher_instance(args.mode, key_bytes, iv_bytes)
+
+            try:
+                plaintext = cipher.decrypt(ciphertext)
+            except ValueError as e:
+                print(f"Error: Decryption failed - {e}", file=sys.stderr)
+                return 1
+
+            if HAS_FILE_IO:
+                write_file(args.output, plaintext)
+            else:
+                with open(args.output, 'wb') as f:
+                    f.write(plaintext)
+
+            if not args.quiet:
+                print(f"Success: Decrypted {args.input} -> {args.output}", file=sys.stderr)
+
+            return 0
+
+    except FileNotFoundError as e:
+        print(f"Error: File not found: {e}", file=sys.stderr)
+        return 1
+    except PermissionError as e:
+        print(f"Error: Permission denied: {e}", file=sys.stderr)
+        return 1
+    except IOError as e:
+        print(f"Error reading/writing file: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error during {'encryption' if args.encrypt else 'decryption'}: {e}", file=sys.stderr)
+        return 1
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='CryptoCore - File Encryption Tool with AES-128'
+        description='CryptoCore - Cryptographic Tool with AES encryption and hash functions',
+        prog='cryptocore',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Hash examples
+  cryptocore dgst --algorithm sha256 --input document.pdf
+  cryptocore dgst --algorithm sha3-256 --input backup.tar --output backup.sha3
+  echo "data" | cryptocore dgst --algorithm sha256 --input -
+
+  # Encryption examples
+  cryptocore encrypt --mode cbc --encrypt --key @00112233445566778899aabbccddeeff --input plain.txt --output encrypted.bin
+  cryptocore encrypt --mode cbc --decrypt --key @00112233445566778899aabbccddeeff --input encrypted.bin --output decrypted.txt
+        '''
     )
 
-    parser.add_argument('--algorithm', choices=['aes'], required=True,
-                        help='Encryption algorithm (only aes supported)')
-    parser.add_argument('--mode', choices=['ecb', 'cbc', 'cfb', 'ofb', 'ctr'], required=True,
-                        help='Block cipher mode of operation')
-    parser.add_argument('--encrypt', action='store_true',
-                        help='Encrypt mode')
-    parser.add_argument('--decrypt', action='store_true',
-                        help='Decrypt mode')
-    parser.add_argument('--key', required=True,
-                        help='Encryption key as @ + 32 hex chars (e.g., @00112233445566778899aabbccddeeff)')
-    parser.add_argument('--input', required=True,
-                        help='Input file path')
-    parser.add_argument('--output', required=True,
-                        help='Output file path')
-    parser.add_argument('--iv',
-                        help='Initialization vector as 32 hex chars (for decryption only)')
+    subparsers = parser.add_subparsers(
+        dest='command',
+        help='Command to execute',
+        required=True,
+        metavar='COMMAND'
+    )
 
-    args = parser.parse_args()
+    encrypt_parser = subparsers.add_parser(
+        'encrypt',
+        help='Encrypt or decrypt files using AES',
+        description='Encrypt or decrypt files using AES-128 with various modes'
+    )
 
-    if not (args.encrypt ^ args.decrypt):
-        parser.error("Must specify either --encrypt or --decrypt")
+    encrypt_parser.add_argument('--algorithm',
+                                choices=['aes'],
+                                default='aes',
+                                help='Encryption algorithm (default: aes)')
 
-    if args.encrypt and args.iv:
-        print("Warning: IV is generated automatically for encryption. Provided IV will be ignored.",
-              file=sys.stderr)
-        args.iv = None
+    encrypt_parser.add_argument('--mode',
+                                choices=['ecb', 'cbc', 'cfb', 'ofb', 'ctr'],
+                                required=True,
+                                help='Block cipher mode of operation')
 
-    if args.decrypt and args.mode != 'ecb' and not args.iv:
-        print("Warning: No IV provided for decryption. Will read IV from input file.",
-              file=sys.stderr)
+    encrypt_group = encrypt_parser.add_mutually_exclusive_group(required=True)
+    encrypt_group.add_argument('--encrypt',
+                               action='store_true',
+                               help='Encrypt mode')
+    encrypt_group.add_argument('--decrypt',
+                               action='store_true',
+                               help='Decrypt mode')
 
-    if args.mode == 'ecb' and args.iv:
-        print("Warning: IV is not used in ECB mode. Provided IV will be ignored.",
-              file=sys.stderr)
-        args.iv = None
+    encrypt_parser.add_argument('--key',
+                                help='Encryption key as @ + 32 hex chars (e.g., @00112233445566778899aabbccddeeff)')
 
-    return args
+    encrypt_parser.add_argument('--input',
+                                required=True,
+                                help='Input file path')
+
+    encrypt_parser.add_argument('--output',
+                                required=True,
+                                help='Output file path')
+
+    encrypt_parser.add_argument('--iv',
+                                help='Initialization vector as 32 hex chars (for modes that require it)')
+
+    encrypt_parser.add_argument('--quiet',
+                                action='store_true',
+                                help='Suppress informational messages')
+
+
+    dgst_parser = subparsers.add_parser(
+        'dgst',
+        help='Compute message digests (hash functions)',
+        description='Compute cryptographic hash values for files'
+    )
+
+    dgst_parser.add_argument('--algorithm',
+                             choices=['sha256', 'sha3-256'],
+                             required=True,
+                             help='Hash algorithm to use')
+
+    dgst_parser.add_argument('--input',
+                             required=True,
+                             help='Input file path (use "-" for stdin)')
+
+    dgst_parser.add_argument('--output',
+                             help='Write hash to file instead of stdout')
+
+    dgst_parser.add_argument('--binary',
+                             action='store_true',
+                             help='Output binary hash instead of hex')
+
+    dgst_parser.add_argument('--quiet',
+                             action='store_true',
+                             help='Suppress informational messages')
+
+    return parser.parse_args()
+
+
+def main():
+    try:
+        args = parse_args()
+
+        if args.command == 'dgst':
+            return dgst_command(args)
+        elif args.command == 'encrypt':
+            return encrypt_command(args)
+        else:
+            print(f"Error: Unknown command '{args.command}'", file=sys.stderr)
+            return 1
+
+    except KeyboardInterrupt:
+        if not getattr(args, 'quiet', False):
+            print("\nOperation cancelled by user", file=sys.stderr)
+        return 130
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

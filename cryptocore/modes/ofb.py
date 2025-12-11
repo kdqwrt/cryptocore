@@ -1,5 +1,6 @@
 from Crypto.Cipher import AES
-import os
+
+from cryptocore.csprng import generate_random_bytes
 
 
 class OFBCipher:
@@ -9,7 +10,7 @@ class OFBCipher:
         self.block_size = 16
 
         if iv is None:
-            self.iv = os.urandom(16)
+            self.iv = generate_random_bytes(16)
         else:
             if len(iv) != 16:
                 raise ValueError("IV must be 16 bytes")

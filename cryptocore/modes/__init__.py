@@ -20,7 +20,7 @@ class BlockCipherMode(ABC):
         pass
 
     def _pad_data(self, data: bytes) -> bytes:
-        """PKCS7 padding - только для режимов, которые этого требуют"""
+
         if not self.requires_padding:
             return data
 
@@ -30,7 +30,7 @@ class BlockCipherMode(ABC):
         return data + bytes([padding_len] * padding_len)
 
     def _unpad_data(self, data: bytes) -> bytes:
-        """PKCS7 unpadding - только для режимов с padding"""
+
         if not self.requires_padding or not data:
             return data
 
@@ -42,9 +42,9 @@ class BlockCipherMode(ABC):
         return data[:-padding_len]
 
     def _generate_iv(self) -> bytes:
-        """Generate cryptographically secure IV"""
+
         return os.urandom(16)
 
     def _split_into_blocks(self, data: bytes) -> list:
-        """Split data into 16-byte blocks"""
+
         return [data[i:i + self.block_size] for i in range(0, len(data), self.block_size)]
