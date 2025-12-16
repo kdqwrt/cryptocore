@@ -1,11 +1,12 @@
 import argparse
 import sys
-import os
-from pathlib import Path
+
+
 
 try:
     from .hash.sha256 import SHA256
     from .hash.sha3_256 import SHA3_256
+
     HAS_HASH_MODULES = True
 except ImportError as e:
     print(f"Warning: Hash modules not found: {e}", file=sys.stderr)
@@ -17,22 +18,37 @@ try:
     from .modes.ctr import CTRCipher
     from .modes.ecb import ECBCipher
     from .modes.ofb import OFBCipher
+
     HAS_ENCRYPTION_MODULES = True
 except ImportError as e:
     print(f"Warning: Encryption modules not found: {e}", file=sys.stderr)
     HAS_ENCRYPTION_MODULES = False
 
+# Импорты модулей MAC (HMAC)
+try:
+    from .mac.hmac import HMAC, StreamingHMAC
+
+    HAS_MAC_MODULES = True
+except ImportError as e:
+    print(f"Warning: MAC modules not found: {e}", file=sys.stderr)
+    HAS_MAC_MODULES = False
+
+# Импорты CSPRNG
 try:
     from .csprng import generate_random_bytes
+
     HAS_CSPRNG = True
 except ImportError as e:
     print(f"Warning: CSPRNG module not found: {e}", file=sys.stderr)
     HAS_CSPRNG = False
     import os
+
     generate_random_bytes = os.urandom
 
+# Импорты File IO
 try:
     from .file_io import read_file, write_file, read_file_with_iv, write_file_with_iv, read_file_chunks
+
     HAS_FILE_IO = True
 except ImportError as e:
     print(f"Warning: File IO module not found: {e}", file=sys.stderr)
@@ -56,6 +72,19 @@ def validate_key(key_str: str) -> bytes:
         raise ValueError("Key must be valid hexadecimal")
 
 
+def parse_hmac_key(key_str: str) -> bytes:
+    if not key_str:
+        raise ValueError("Key cannot be empty")
+
+    try:
+        if key_str.startswith('@'):
+            key_str = key_str[1:]
+
+        return bytes.fromhex(key_str)
+    except ValueError:
+        raise ValueError("Key must be valid hexadecimal")
+
+
 def check_weak_key(key_bytes: bytes) -> bool:
     if not key_bytes:
         return False
@@ -69,7 +98,165 @@ def check_weak_key(key_bytes: bytes) -> bool:
     return sequential_up or sequential_down
 
 
+def read_hmac_file(filename: str) -> str:
+    try:
+        with open(filename, 'r') as f:
+            content = f.read().strip()
+
+        if not content:
+            raise ValueError("HMAC file is empty")
+
+        lines = content.splitlines()
+
+        for line in lines:
+
+            words = line.strip().split()
+
+            for word in words:
+                # Убираем возможные символы пробелов и табуляции
+                word = word.strip()
+
+                if (len(word) == 64 and
+                        all(c in '0123456789abcdefABCDEF' for c in word)):
+                    return word.lower()
+
+        # Если не нашли, пробуем взять первое слово из первой строки
+        if lines:
+            first_word = lines[0].strip().split()[0] if lines[0].strip() else ''
+            if (len(first_word) == 64 and
+                    all(c in '0123456789abcdefABCDEF' for c in first_word)):
+                return first_word.lower()
+
+        raise ValueError(f"No valid HMAC found in file {filename}")
+
+    except FileNotFoundError:
+        raise ValueError(f"HMAC file '{filename}' not found")
+    except Exception as e:
+        raise ValueError(f"Failed to read HMAC file: {e}")
+
+
+def hmac_command(args):
+    if not HAS_MAC_MODULES:
+        print("Error: MAC modules are not available", file=sys.stderr)
+        return 1
+
+    if not args.key:
+        print("Error: --key is required for HMAC operations", file=sys.stderr)
+        return 1
+
+    if args.input != '-' and not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
+        return 1
+
+    try:
+        # Парсим ключ
+        key_bytes = parse_hmac_key(args.key)
+
+        # Проверяем ключ на слабость
+        if check_weak_key(key_bytes):
+            if not args.quiet:
+                print("Warning: The provided key appears to be weak. Consider using a randomly generated key.",
+                      file=sys.stderr)
+
+
+        hmac = StreamingHMAC(key_bytes, args.algorithm)
+
+
+        if args.input == '-':
+            while True:
+                chunk = sys.stdin.buffer.read(8192)
+                if not chunk:
+                    break
+                hmac.update(chunk)
+        else:
+            if HAS_FILE_IO:
+                for chunk in read_file_chunks(args.input, chunk_size=8192):
+                    hmac.update(chunk)
+            else:
+                with open(args.input, 'rb') as f:
+                    while True:
+                        chunk = f.read(8192)
+                        if not chunk:
+                            break
+                        hmac.update(chunk)
+
+
+        computed_hmac = hmac.hexdigest()
+
+        if args.verify:
+            try:
+                expected_hmac = read_hmac_file(args.verify)
+
+                if computed_hmac == expected_hmac:
+                    if not args.quiet:
+                        print(f"[OK] HMAC verification successful for {args.input}", file=sys.stderr)
+                    return 0
+                else:
+                    print(f"[ERROR] HMAC verification failed for {args.input}", file=sys.stderr)
+                    if not args.quiet:
+                        print(f"Computed: {computed_hmac}", file=sys.stderr)
+                        print(f"Expected: {expected_hmac}", file=sys.stderr)
+                    return 1
+            except ValueError as e:
+                print(f"Error reading verification file: {e}", file=sys.stderr)
+                return 1
+
+
+        output_line = f"{computed_hmac} {args.input}" if args.input != '-' else computed_hmac
+
+        if args.output:
+            try:
+                if args.binary:
+                    if HAS_FILE_IO:
+                        write_file(args.output, hmac.digest())
+                    else:
+                        with open(args.output, 'wb') as out_file:
+                            out_file.write(hmac.digest())
+                else:
+                    output_text = output_line + '\n'
+                    if HAS_FILE_IO:
+                        write_file(args.output, output_text.encode('utf-8'))
+                    else:
+                        with open(args.output, 'w') as out_file:
+                            out_file.write(output_text)
+
+                if not args.quiet:
+                    print(f"HMAC written to: {args.output}", file=sys.stderr)
+            except IOError as e:
+                print(f"Error writing to output file: {e}", file=sys.stderr)
+                return 1
+            except PermissionError as e:
+                print(f"Error: Permission denied for output file '{args.output}': {e}", file=sys.stderr)
+                return 1
+        else:
+            if args.binary:
+                sys.stdout.buffer.write(hmac.digest())
+            else:
+                print(output_line)
+
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except PermissionError as e:
+        print(f"Error: Permission denied for file '{args.input}': {e}", file=sys.stderr)
+        return 1
+    except IOError as e:
+        print(f"Error reading file '{args.input}': {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error during HMAC computation: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    return 0
+
+
 def dgst_command(args):
+
+    if args.hmac:
+        return hmac_command(args)
+
     if not HAS_HASH_MODULES:
         print("Error: Hash modules are not available", file=sys.stderr)
         return 1
@@ -250,7 +437,7 @@ def encrypt_command(args):
 
             return 0
 
-        else:
+        else:  # decryption
             if not key_bytes:
                 print("Error: Key is required for decryption", file=sys.stderr)
                 return 1
@@ -323,7 +510,7 @@ def encrypt_command(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='CryptoCore - Cryptographic Tool with AES encryption and hash functions',
+        description='CryptoCore - Cryptographic Tool with AES encryption, hash functions and HMAC',
         prog='cryptocore',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
@@ -332,6 +519,11 @@ Examples:
   cryptocore dgst --algorithm sha256 --input document.pdf
   cryptocore dgst --algorithm sha3-256 --input backup.tar --output backup.sha3
   echo "data" | cryptocore dgst --algorithm sha256 --input -
+
+  # HMAC examples
+  cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt
+  cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt --verify expected.txt
+  cryptocore dgst --algorithm sha3-256 --hmac --key 00112233445566778899aabbccddeeff --input data.bin --output hmac.txt
 
   # Encryption examples
   cryptocore encrypt --mode cbc --encrypt --key @00112233445566778899aabbccddeeff --input plain.txt --output encrypted.bin
@@ -388,11 +580,10 @@ Examples:
                                 action='store_true',
                                 help='Suppress informational messages')
 
-
     dgst_parser = subparsers.add_parser(
         'dgst',
-        help='Compute message digests (hash functions)',
-        description='Compute cryptographic hash values for files'
+        help='Compute message digests (hash functions) and HMAC',
+        description='Compute cryptographic hash values and HMAC for files'
     )
 
     dgst_parser.add_argument('--algorithm',
@@ -400,16 +591,26 @@ Examples:
                              required=True,
                              help='Hash algorithm to use')
 
+    dgst_parser.add_argument('--hmac',
+                             action='store_true',
+                             help='Enable HMAC mode (requires --key)')
+
+    dgst_parser.add_argument('--key',
+                             help='Key for HMAC (hexadecimal string, e.g., 00112233445566778899aabbccddeeff)')
+
+    dgst_parser.add_argument('--verify',
+                             help='Verify HMAC against file with expected value')
+
     dgst_parser.add_argument('--input',
                              required=True,
                              help='Input file path (use "-" for stdin)')
 
     dgst_parser.add_argument('--output',
-                             help='Write hash to file instead of stdout')
+                             help='Write hash/HMAC to file instead of stdout')
 
     dgst_parser.add_argument('--binary',
                              action='store_true',
-                             help='Output binary hash instead of hex')
+                             help='Output binary hash/HMAC instead of hex')
 
     dgst_parser.add_argument('--quiet',
                              action='store_true',
@@ -436,6 +637,8 @@ def main():
         return 130
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return 1
 
 
