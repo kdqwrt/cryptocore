@@ -3,13 +3,12 @@ from typing import Generator, Tuple, Optional
 
 
 def read_file(filename: str) -> bytes:
-    """Чтение файла как бинарных данных."""
     with open(filename, 'rb') as f:
         return f.read()
 
 
 def read_file_chunks(filename: str, chunk_size: int = 8192) -> Generator[bytes, None, None]:
-    """Чтение файла по частям."""
+
     with open(filename, 'rb') as f:
         while True:
             chunk = f.read(chunk_size)
@@ -29,10 +28,7 @@ def write_file(filename: str, data: bytes):
 
 
 def read_file_with_iv(filename: str) -> Tuple[bytes, bytes]:
-    """
-    Чтение файла, содержащего IV в начале (16 байт).
-    Для режимов CBC, CFB, OFB.
-    """
+
     data = read_file(filename)
 
     if len(data) < 16:
@@ -48,20 +44,9 @@ def write_file_with_iv(filename: str, iv: bytes, data: bytes):
     write_file(filename, iv + data)
 
 
-# === НОВЫЕ ФУНКЦИИ ДЛЯ AEAD ===
 
 def read_file_with_nonce(filename: str, nonce_size: int = 12) -> Tuple[bytes, bytes]:
-    """
-    Чтение файла, содержащего nonce в начале.
-    Для режима GCM (12-байтовый nonce).
 
-    Args:
-        filename: Имя файла
-        nonce_size: Размер nonce (по умолчанию 12 байт для GCM)
-
-    Returns:
-        Tuple[nonce, остальные_данные]
-    """
     data = read_file(filename)
 
     if len(data) < nonce_size:
@@ -78,13 +63,7 @@ def write_file_with_nonce(filename: str, nonce: bytes, data: bytes):
 
 
 def read_gcm_file(filename: str) -> Tuple[bytes, bytes, bytes]:
-    """
-    Чтение файла в формате GCM.
-    Формат: [12-байтовый nonce][шифртекст][16-байтовый тег]
 
-    Returns:
-        Tuple[nonce, ciphertext_without_tag, tag]
-    """
     data = read_file(filename)
 
     if len(data) < 28:  # 12 байт nonce + 16 байт тег
@@ -104,10 +83,7 @@ def read_gcm_file(filename: str) -> Tuple[bytes, bytes, bytes]:
 
 
 def write_gcm_file(filename: str, nonce: bytes, ciphertext: bytes, tag: bytes):
-    """
-    Запись файла в формате GCM.
-    Формат: [12-байтовый nonce][шифртекст][16-байтовый тег]
-    """
+
     if len(nonce) != 12:
         raise ValueError("Nonce must be 12 bytes for GCM")
     if len(tag) != 16:
@@ -117,18 +93,7 @@ def write_gcm_file(filename: str, nonce: bytes, ciphertext: bytes, tag: bytes):
 
 
 def read_etm_file(filename: str, iv_size: int = 16, tag_size: int = 32) -> Tuple[bytes, bytes, bytes]:
-    """
-    Чтение файла в формате Encrypt-then-MAC.
-    Формат: [IV][шифртекст][тег]
 
-    Args:
-        filename: Имя файла
-        iv_size: Размер IV (16 байт для AES)
-        tag_size: Размер тега (32 байта для HMAC-SHA256)
-
-    Returns:
-        Tuple[iv, ciphertext, tag]
-    """
     data = read_file(filename)
 
     min_size = iv_size + tag_size
@@ -157,18 +122,7 @@ def write_etm_file(filename: str, iv: bytes, ciphertext: bytes, tag: bytes):
 
 
 def safe_write_file(filename: str, data: bytes, temp_suffix: str = ".tmp") -> bool:
-    """
-    Безопасная запись файла с использованием временного файла.
-    В случае ошибки временный файл удаляется.
 
-    Args:
-        filename: Целевой файл
-        data: Данные для записи
-        temp_suffix: Суффикс временного файла
-
-    Returns:
-        True если успешно, False если ошибка
-    """
     temp_file = filename + temp_suffix
     success = False
 
@@ -208,16 +162,7 @@ def delete_file_if_exists(filename: str):
 
 
 def read_file_with_format(filename: str, format_type: str = "gcm") -> Tuple:
-    """
-    Универсальная функция чтения файлов разных форматов.
 
-    Args:
-        filename: Имя файла
-        format_type: Тип формата ("gcm", "etm", "iv", "nonce", "raw")
-
-    Returns:
-        Данные в формате, зависящем от типа
-    """
     if format_type == "gcm":
         return read_gcm_file(filename)
     elif format_type == "etm":
@@ -255,7 +200,7 @@ def write_file_with_format(filename: str, format_type: str = "gcm", **kwargs):
         raise ValueError(f"Unsupported format: {format_type}")
 
 
-# === СУЩЕСТВУЮЩИЕ ФУНКЦИИ (ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ) ===
+
 
 def get_file_size(filename: str) -> int:
     return os.path.getsize(filename)
@@ -279,16 +224,7 @@ def is_file_writable(filename: str) -> bool:
 
 
 def verify_file_integrity_after_write(filename: str, expected_size: Optional[int] = None) -> bool:
-    """
-    Проверка целостности файла после записи.
 
-    Args:
-        filename: Имя файла
-        expected_size: Ожидаемый размер (опционально)
-
-    Returns:
-        True если файл цел, False если есть проблемы
-    """
     try:
         if not file_exists(filename):
             return False

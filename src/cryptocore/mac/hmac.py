@@ -1,6 +1,6 @@
 try:
-    from ..hash.sha256 import SHA256
-    from ..hash.sha3_256 import SHA3_256
+    from cryptocore.hash.sha256 import SHA256
+    from cryptocore.hash.sha3_256 import SHA3_256
 
     HAS_HASH_MODULES = True
 except ImportError as e:

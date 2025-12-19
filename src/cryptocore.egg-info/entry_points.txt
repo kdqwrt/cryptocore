@@ -1,0 +1,2 @@
+[console_scripts]
+cryptocore = cryptocore.cli:main

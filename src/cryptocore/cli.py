@@ -4,8 +4,8 @@ import os
 
 # Импорты hash модулей
 try:
-    from .hash.sha256 import SHA256
-    from .hash.sha3_256 import SHA3_256
+    from cryptocore.hash.sha256 import SHA256
+    from cryptocore.hash.sha3_256 import SHA3_256
 
     HAS_HASH_MODULES = True
 except ImportError as e:
@@ -14,11 +14,11 @@ except ImportError as e:
 
 # Импорты encryption модулей
 try:
-    from .modes.cbc import CBCCipher
-    from .modes.cfb import CFBCipher
-    from .modes.ctr import CTRCipher
-    from .modes.ecb import ECBCipher
-    from .modes.ofb import OFBCipher
+    from cryptocore.modes.cbc import CBCCipher
+    from cryptocore.modes.cfb import CFBCipher
+    from cryptocore.modes.ctr import CTRCipher
+    from cryptocore.modes.ecb import ECBCipher
+    from cryptocore.modes.ofb import OFBCipher
 
     HAS_ENCRYPTION_MODULES = True
 except ImportError as e:
@@ -27,7 +27,7 @@ except ImportError as e:
 
 # Импорты GCM модуля
 try:
-    from .modes.gcm import GCM, AuthenticationError
+    from cryptocore.modes.gcm import GCM, AuthenticationError
 
     HAS_GCM = True
 except ImportError as e:
@@ -39,7 +39,7 @@ except ImportError as e:
 
 # Импорты MAC (HMAC) модулей
 try:
-    from .mac.hmac import HMAC, StreamingHMAC
+    from cryptocore.mac.hmac import HMAC, StreamingHMAC
 
     HAS_MAC_MODULES = True
 except ImportError as e:
@@ -48,7 +48,7 @@ except ImportError as e:
 
 # Импорты CSPRNG
 try:
-    from .csprng import generate_random_bytes
+    from cryptocore.csprng import generate_random_bytes
 
     HAS_CSPRNG = True
 except ImportError as e:
@@ -60,7 +60,7 @@ except ImportError as e:
 
 # Импорты File IO
 try:
-    from .file_io import (
+    from cryptocore.file_io import (
         read_file, write_file, read_file_with_iv, write_file_with_iv,
         read_file_chunks, read_gcm_file, write_gcm_file, safe_write_file,
         delete_file_if_exists
@@ -70,6 +70,16 @@ try:
 except ImportError as e:
     print(f"Warning: File IO module not found: {e}", file=sys.stderr)
     HAS_FILE_IO = False
+
+# Импорты KDF модулей
+try:
+    from cryptocore.kdf.pbkdf2 import pbkdf2
+    from cryptocore.kdf.hkdf import derive_key as hkdf_derive_key
+
+    HAS_KDF_MODULES = True
+except ImportError as e:
+    print(f"Warning: KDF modules not found: {e}", file=sys.stderr)
+    HAS_KDF_MODULES = False
 
 
 def validate_key(key_str: str) -> bytes:
@@ -664,10 +674,111 @@ def encrypt_command(args):
         return 1
 
 
+def derive_command(args):
+    """Обработка команды получения ключей."""
+    if not HAS_KDF_MODULES:
+        print("Error: KDF modules are not available", file=sys.stderr)
+        return 1
+
+    if not args.password:
+        print("Error: --password is required", file=sys.stderr)
+        return 1
+
+    try:
+        # Генерация соли, если не предоставлена
+        salt_bytes = None
+        if args.salt:
+            try:
+                salt_bytes = bytes.fromhex(args.salt)
+            except ValueError:
+                print("Error: Salt must be valid hexadecimal", file=sys.stderr)
+                return 1
+        else:
+            # Генерация случайной соли длиной 16 байт
+            if HAS_CSPRNG:
+                salt_bytes = generate_random_bytes(16)
+            else:
+                import secrets
+                salt_bytes = secrets.token_bytes(16)
+
+        # Проверка алгоритма
+        if args.algorithm == 'pbkdf2':
+            # Получение ключа с помощью PBKDF2
+            key_hex = pbkdf2(
+                password=args.password,
+                salt_hex=salt_bytes.hex(),
+                iterations=args.iterations,
+                dklen=args.length
+            )
+
+            # Формирование вывода
+            output_text = f"{key_hex} {salt_bytes.hex()}"
+
+        elif args.algorithm == 'hkdf':
+            # Для HKDF требуется мастер-ключ
+            # В данном случае используем пароль как мастер-ключ
+            master_key = args.password.encode('utf-8')
+            context = args.context if hasattr(args, 'context') and args.context else "default"
+
+            key_bytes = hkdf_derive_key(master_key, context, args.length)
+            output_text = f"{key_bytes.hex()} {salt_bytes.hex()}"
+
+        else:
+            print(f"Error: Unsupported algorithm '{args.algorithm}'", file=sys.stderr)
+            return 1
+
+        # Запись вывода
+        if args.output:
+            try:
+                if args.binary:
+                    # Запись сырых бинарных байт ключа (без соли)
+                    key_bytes_out = bytes.fromhex(key_hex) if args.algorithm == 'pbkdf2' else key_bytes
+                    if HAS_FILE_IO:
+                        write_file(args.output, key_bytes_out)
+                    else:
+                        with open(args.output, 'wb') as out_file:
+                            out_file.write(key_bytes_out)
+                else:
+                    # Запись текстового вывода
+                    output_text = output_text + '\n'
+                    if HAS_FILE_IO:
+                        write_file(args.output, output_text.encode('utf-8'))
+                    else:
+                        with open(args.output, 'w') as out_file:
+                            out_file.write(output_text)
+
+                if not args.quiet:
+                    print(f"Key written to: {args.output}", file=sys.stderr)
+            except IOError as e:
+                print(f"Error writing to output file: {e}", file=sys.stderr)
+                return 1
+        else:
+            # Вывод в stdout
+            print(output_text)
+
+        # Очистка пароля из памяти (насколько это возможно в Python)
+        # Создаем локальную копию и перезаписываем
+        password_bytes = args.password.encode('utf-8')
+        for i in range(len(password_bytes)):
+            password_bytes = password_bytes[:i] + b'\x00' + password_bytes[i + 1:]
+        del password_bytes
+
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error during key derivation: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    return 0
+
+
 def parse_args():
     """Парсинг аргументов командной строки."""
     parser = argparse.ArgumentParser(
-        description='CryptoCore - Cryptographic Tool with AES encryption, hash functions, HMAC, and AEAD',
+        description='CryptoCore - Cryptographic Tool with AES encryption, hash functions, HMAC, AEAD, and key derivation',
         prog='cryptocore',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
@@ -688,6 +799,11 @@ Examples:
   # GCM examples (authenticated encryption)
   cryptocore encrypt --mode gcm --encrypt --key @00112233445566778899aabbccddeeff --input plain.txt --output encrypted.bin --aad aabbccddeeff
   cryptocore encrypt --mode gcm --decrypt --key @00112233445566778899aabbccddeeff --input encrypted.bin --output decrypted.txt --aad aabbccddeeff
+
+  # Key derivation examples
+  cryptocore derive --password "MySecurePassword123" --salt a1b2c3d4e5f6012345678901234
+  cryptocore derive --password "AnotherPassword" --iterations 500000 --length 16
+  cryptocore derive --password "app_key" --salt fixedappsalt --iterations 10000 --length 32 --output app.key
         '''
     )
 
@@ -781,6 +897,49 @@ Examples:
                              action='store_true',
                              help='Suppress informational messages')
 
+    # Парсер для получения ключей
+    derive_parser = subparsers.add_parser(
+        'derive',
+        help='Derive cryptographic keys from passwords or master keys',
+        description='Derive keys using PBKDF2 or hierarchical key derivation'
+    )
+
+    derive_parser.add_argument('--password',
+                               required=True,
+                               help='Password string or master key')
+
+    derive_parser.add_argument('--salt',
+                               help='Salt as hexadecimal string (16 bytes recommended). If not provided, random salt will be generated')
+
+    derive_parser.add_argument('--iterations',
+                               type=int,
+                               default=100000,
+                               help='Number of iterations (default: 100000)')
+
+    derive_parser.add_argument('--length',
+                               type=int,
+                               default=32,
+                               help='Desired key length in bytes (default: 32)')
+
+    derive_parser.add_argument('--algorithm',
+                               choices=['pbkdf2', 'hkdf'],
+                               default='pbkdf2',
+                               help='Key derivation algorithm (default: pbkdf2)')
+
+    derive_parser.add_argument('--context',
+                               help='Context string for hierarchical key derivation (for hkdf algorithm only)')
+
+    derive_parser.add_argument('--output',
+                               help='Write derived key to file (binary format)')
+
+    derive_parser.add_argument('--binary',
+                               action='store_true',
+                               help='Output binary key (only when using --output)')
+
+    derive_parser.add_argument('--quiet',
+                               action='store_true',
+                               help='Suppress informational messages')
+
     return parser.parse_args()
 
 
@@ -793,6 +952,8 @@ def main():
             return dgst_command(args)
         elif args.command == 'encrypt':
             return encrypt_command(args)
+        elif args.command == 'derive':
+            return derive_command(args)
         else:
             print(f"Error: Unknown command '{args.command}'", file=sys.stderr)
             return 1
