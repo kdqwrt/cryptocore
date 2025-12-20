@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from cryptocore.cli import parse_args, validate_key, validate_iv
+from cryptocore.cli import parse_args, validate_key
 from cryptocore.file_io import read_file, write_file, read_file_with_iv, write_file_with_iv
 from cryptocore.modes.ecb import ECBCipher
 from cryptocore.modes.cbc import CBCCipher
@@ -77,7 +77,7 @@ def main():
             key = validate_key(args.key)
 
 
-        iv = validate_iv(args.iv) if args.iv else None
+
         print(f"Processing {args.input} -> {args.output} using {args.mode.upper()} mode...")
 
         if args.encrypt and args.iv and args.mode != 'ecb':

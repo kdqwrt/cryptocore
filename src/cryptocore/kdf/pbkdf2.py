@@ -5,6 +5,21 @@
 from cryptocore.mac.hmac import HMAC
 
 
+def hmac_sha256(key: bytes, msg: bytes) -> bytes:
+    """
+    HMAC-SHA256 с использованием нашей реализации из Спринта 5.
+
+    Args:
+        key: Ключ HMAC
+        msg: Сообщение для хеширования
+
+    Returns:
+        HMAC-SHA256 хеш
+    """
+    hmac = HMAC(key, 'sha256')
+    return hmac.compute(msg)
+
+
 def pbkdf2_hmac_sha256(password: bytes, salt: bytes, iterations: int, dklen: int) -> bytes:
     """
     Реализация PBKDF2-HMAC-SHA256 согласно RFC 2898.
@@ -32,32 +47,32 @@ def pbkdf2_hmac_sha256(password: bytes, salt: bytes, iterations: int, dklen: int
     if iterations <= 0:
         raise ValueError("iterations должен быть положительным числом")
 
-    # Количество блоков HMAC-SHA256 (32 байта на блок)
-    blocks_needed = (dklen + 31) // 32  # ceil(dklen / 32)
+    # Размер выхода HMAC-SHA256 (32 байта)
+    hlen = 32
+
+    # Количество блоков
+    blocks_needed = (dklen + hlen - 1) // hlen  # ceil(dklen / hlen)
     derived_key = bytearray()
 
     # Вычисляем каждый блок Ti
-    for block_index in range(1, blocks_needed + 1):
+    for i in range(1, blocks_needed + 1):
         # U1 = HMAC-SHA256(password, salt || INT_32_BE(i))
-        hmac_input = salt + block_index.to_bytes(4, 'big')
-        hmac = HMAC(password, 'sha256')
-        u_prev = hmac.compute(hmac_input)
+        current_block_input = salt + i.to_bytes(4, 'big')
+        u_current = hmac_sha256(password, current_block_input)
 
-        # Начинаем с U1
-        block = bytearray(u_prev)
+        # Инициализируем блок аккумулятора с U1
+        accumulator = bytearray(u_current)
 
-        # Вычисляем U2 через Uc и XOR с блоком
+        # Вычисляем U2 через Uc и XOR с аккумулятором
         for _ in range(2, iterations + 1):
-            hmac = HMAC(password, 'sha256')
-            u_curr = hmac.compute(u_prev)
+            # Uj = HMAC(password, Uj-1)
+            u_current = hmac_sha256(password, u_current)
 
-            # XOR: block = block ⊕ u_curr
-            for k in range(len(block)):
-                block[k] ^= u_curr[k]
+            # XOR: accumulator = accumulator ⊕ u_current
+            for j in range(hlen):
+                accumulator[j] ^= u_current[j]
 
-            u_prev = u_curr
-
-        derived_key.extend(block)
+        derived_key.extend(accumulator)
 
     # Вернуть ровно dklen байт
     return bytes(derived_key[:dklen])
@@ -94,18 +109,3 @@ def pbkdf2(password: str, salt_hex: str, iterations: int = 100000, dklen: int = 
 
     key_bytes = pbkdf2_hmac_sha256(password_bytes, salt_bytes, iterations, dklen)
     return key_bytes.hex()
-
-
-def hmac_sha256(key: bytes, msg: bytes) -> bytes:
-    """
-    HMAC-SHA256 с использованием нашей реализации из Спринта 5.
-
-    Args:
-        key: Ключ HMAC
-        msg: Сообщение для хеширования
-
-    Returns:
-        HMAC-SHA256 хеш
-    """
-    hmac = HMAC(key, 'sha256')
-    return hmac.compute(msg)
