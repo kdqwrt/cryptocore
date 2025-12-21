@@ -3,11 +3,29 @@
 ## Установка
 
 ```bash
+sudo apt install git
+
+sudo apt update
+
+sudo apt install python3-venv python3-pip python3-full
+
 git clone https://github.com/kdqwrt/cryptocore.git
+
 python3 -m venv venv
+
 source venv/bin/activate
+
+cd cryptocore
+
+dir 
+
+pip install --upgrade pip
+
 pip install -e .
-cryptocore --help
+
+pip install setuptools wheel
+
+python all_tests.py
 ```
 ## Быстрая шпаргалка
 ```bash
