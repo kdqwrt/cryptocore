@@ -3,7 +3,7 @@
 ## Установка
 
 ```bash
-cd pythonProject9
+https://github.com/kdqwrt/cryptocore.git
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
