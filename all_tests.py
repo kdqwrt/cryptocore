@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-"""
-Запуск всех тестов cryptocore
-"""
 
 import os
 import sys
@@ -15,11 +11,20 @@ def run_test_file(test_file):
     print("=" * 60)
 
     try:
-        # Специальные настройки для каждого теста
+        # Для ВСЕХ тестов используем правильный путь
+        test_path = os.path.join('tests', 'unit', test_file)
+
+        # Проверяем существование файла
+        if not os.path.exists(test_path):
+            print(f"  Файл не найден: {test_path}")
+            return False
+
+        print(f"  Путь: {test_path}")
+
+        # Специальные настройки для test_m2.py
         if test_file == "test_m2.py":
-            # test_m2.py нужно запускать из директории tests
             original_cwd = os.getcwd()
-            tests_dir = os.path.join(os.path.dirname(__file__), 'tests')
+            tests_dir = os.path.join(os.path.dirname(__file__), 'tests', 'unit')
             os.chdir(tests_dir)
 
             # Импортируем и запускаем
@@ -34,10 +39,14 @@ def run_test_file(test_file):
             return success
 
         else:
-            # Для остальных тестов просто импортируем и запускаем
-            test_path = os.path.join('tests', test_file)
+            # Для остальных тестов импортируем и запускаем
             spec = importlib.util.spec_from_file_location("test_module", test_path)
             module = importlib.util.module_from_spec(spec)
+
+            # Добавляем корень проекта в sys.path для импорта cryptocore
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
 
             # Сохраняем оригинальные аргументы
             original_argv = sys.argv.copy()
@@ -57,6 +66,7 @@ def run_test_file(test_file):
                         return True
                 else:
                     # Если нет main(), просто считаем успешным если нет исключений
+                    print(" Тест не имеет функции main()")
                     return True
 
             finally:
@@ -94,8 +104,13 @@ def main():
         "test_csprng.py"
     ]
 
-    print(" ЗАПУСК ВСЕХ ТЕСТОВ ")
+    print(" ЗАПУСК ВСЕХ ТЕСТОВ CRYPTOCORE")
     print("=" * 60)
+
+    # Текущая директория
+    current_dir = os.getcwd()
+    print(f"Текущая директория: {current_dir}")
+    print(f"Существует tests/unit: {os.path.exists('tests/unit')}")
 
     results = []
 
@@ -103,12 +118,12 @@ def main():
         test_path = os.path.join('tests', 'unit', test_file)
 
         if not os.path.exists(test_path):
-            print(f"  Тест не найден: {test_file}")
+            print(f"Тест не найден: {test_path}")
             continue
 
         success = run_test_file(test_file)
         status = " УСПЕХ" if success else " ОШИБКА"
-        print(f"\n{status}: {test_file}")
+        print(f"{status}: {test_file}")
         results.append((test_file, success))
 
     # Вывод итогов
@@ -119,20 +134,22 @@ def main():
     passed = sum(1 for _, success in results if success)
     total = len(results)
 
-    for test_file, success in results:
-        status = "" if success else ""
-        print(f"{status} {test_file}")
+
 
     print(f"\n РЕЗУЛЬТАТ: {passed}/{total} тестов пройдено")
 
     if passed == total:
-        print(" ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ!")
+        print("ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ!")
         return True
     else:
-        print(f" {total - passed} тестов не пройдено")
+        print(f"⚠ {total - passed} тестов не пройдено")
         return False
 
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    try:
+        success = main()
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        print("\n\nТестирование прервано пользователем")
+        sys.exit(130)
