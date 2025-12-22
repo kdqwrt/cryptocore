@@ -512,7 +512,7 @@ def test_cli_examples():
         if "authentication" in result.stderr.lower() or "аутентификации" in result.stderr.lower():
             print("✓ Сообщение об ошибке аутентификации выведено")
         else:
-            print(f"⚠️  Нестандартное сообщение об ошибке: {result.stderr[:100]}...")
+            print(f" Нестандартное сообщение об ошибке: {result.stderr[:100]}...")
 
         return True
 
@@ -562,17 +562,17 @@ def main():
             results.append((test_name, success, is_mandatory))
 
             if success:
-                print(f"  ✅ {test_name}: ПРОЙДЕН")
+                print(f"   {test_name}: ПРОЙДЕН")
                 if is_mandatory:
                     mandatory_passed += 1
             else:
-                print(f"  ❌ {test_name}: НЕ ПРОЙДЕН")
+                print(f"   {test_name}: НЕ ПРОЙДЕН")
 
             if is_mandatory:
                 mandatory_total += 1
 
         except Exception as e:
-            print(f"  ❌ {test_name}: ОШИБКА - {e}")
+            print(f"   {test_name}: ОШИБКА - {e}")
             import traceback
             traceback.print_exc()
             results.append((test_name, False, is_mandatory))
@@ -592,7 +592,7 @@ def main():
         if success:
             all_passed += 1
 
-        status = "✅ ПРОЙДЕН" if success else "❌ НЕ ПРОЙДЕН"
+        status = " ПРОЙДЕН" if success else " НЕ ПРОЙДЕН"
         mandatory = "(обязательно)" if is_mandatory else "(желательно)"
         print(f"{status} {mandatory}: {test_name}")
 
@@ -601,10 +601,10 @@ def main():
 
     # Проверяем успешность
     if mandatory_passed == mandatory_total:
-        print("\n🎉 ВСЕ ОБЯЗАТЕЛЬНЫЕ ТЕСТЫ СПРИНТА 6 УСПЕШНО ПРОЙДЕНЫ!")
+        print("\n ВСЕ ОБЯЗАТЕЛЬНЫЕ ТЕСТЫ СПРИНТА 6 УСПЕШНО ПРОЙДЕНЫ!")
         overall_success = True
     else:
-        print(f"\n⚠️  {mandatory_total - mandatory_passed} обязательных тестов не пройдено")
+        print(f"\n  {mandatory_total - mandatory_passed} обязательных тестов не пройдено")
         overall_success = False
 
     return overall_success
