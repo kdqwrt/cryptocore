@@ -80,5 +80,53 @@ cryptocore dgst --algorithm sha256 --hmac --key ключ --input файл.txt --
 Работа с ключами
 ```bash
 python3 -c "import os; print('@' + os.urandom(16).hex())"
-cryptocore derive --password "мойпароль" --length 32
 cryptocore derive --password "пароль" --salt a1b2c3d4e5f6 --iterations 100000 --length 16
+```
+## Структура проекта
+```
+pythonProject9/
+├── src/
+│ └── cryptocore/
+│ ├── init.py
+│ ├── aead.py
+│ ├── cli.py
+│ ├── csprng.py
+│ ├── file_io.py
+│ ├── hash/
+│ │ ├── init.py
+│ │ ├── sha256.py
+│ │ └── sha3_256.py
+│ ├── kdf/
+│ │ ├── init.py
+│ │ ├── hkdf.py
+│ │ └── pbkdf2.py
+│ ├── mac/
+│ │ ├── init.py
+│ │ └── hmac.py
+│ └── modes/
+│ ├── init.py
+│ ├── cbc.py
+│ ├── cfb.py
+│ ├── ctr.py
+│ ├── ecb.py
+│ ├── gcm.py
+│ └── ofb.py
+├── tests/
+│ ├── init.py
+│ └── unit/
+│ ├── init.py
+│ ├── test_cli.py
+│ ├── test_csprng.py
+│ ├── test_ech.py
+│ ├── test_gcm.py
+│ ├── test_hash.py
+│ ├── test_hkdf.py
+│ ├── test_hmac.py
+│ ├── test_m2.py
+│ ├── test_pbkdf2.py
+│ └── test_salt.py
+├── all_test.py
+├── requirements.txt
+└── setup.py
+
+````
