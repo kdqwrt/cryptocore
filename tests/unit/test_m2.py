@@ -5,16 +5,19 @@ import subprocess
 from io import StringIO
 from unittest.mock import patch
 
-# путь к исходному коду
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Добавляем путь к src для импорта cryptocore
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
-from src.cryptocore.modes.ecb import ECBCipher
-from src.cryptocore.modes.cbc import CBCCipher
-from src.cryptocore.modes.cfb import CFBCipher
-from src.cryptocore.modes.ofb import OFBCipher
-from src.cryptocore.modes.ctr import CTRCipher
-from src.cryptocore.file_io import read_file, write_file, write_file_with_iv, read_file_with_iv
-from src.cryptocore.cli import parse_args, validate_key
+from cryptocore.modes.ecb import ECBCipher
+from cryptocore.modes.cbc import CBCCipher
+from cryptocore.modes.cfb import CFBCipher
+from cryptocore.modes.ofb import OFBCipher
+from cryptocore.modes.ctr import CTRCipher
+from cryptocore.file_io import read_file, write_file, write_file_with_iv, read_file_with_iv
+from cryptocore.cli import parse_args, validate_key
 
 
 class TestMilestone2:

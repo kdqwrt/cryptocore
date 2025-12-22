@@ -1,7 +1,11 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Добавляем путь к src для импорта cryptocore
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 from cryptocore.kdf.hkdf import derive_key
 
@@ -151,6 +155,49 @@ def test_hkdf_security():
         return False
 
 
+def test_hkdf_error_handling():
+    """Тест обработки ошибок в HKDF"""
+    print("\n" + "=" * 60)
+    print("TEST: Тестирование обработки ошибок HKDF")
+    print("=" * 60)
+    
+    master_key = b"master_key_12345"
+    context = "test_context"
+    
+    # Тест с неположительной длиной
+    try:
+        derive_key(master_key, context, length=0)
+        assert False, "Should raise ValueError for length <= 0"
+    except ValueError as e:
+        assert "положительным" in str(e).lower() or "positive" in str(e).lower()
+        print("✓ ValueError raised for length <= 0")
+    
+    try:
+        derive_key(master_key, context, length=-1)
+        assert False, "Should raise ValueError for negative length"
+    except ValueError as e:
+        assert "положительным" in str(e).lower() or "positive" in str(e).lower()
+        print("✓ ValueError raised for negative length")
+    
+    # Тест с context как bytes (не строка)
+    context_bytes = b"test_context_bytes"
+    result = derive_key(master_key, context_bytes, length=16)
+    assert isinstance(result, bytes), "Should return bytes"
+    assert len(result) == 16, "Should return correct length"
+    print("✓ derive_key works with bytes context")
+    
+    # Тест функции hmac_sha256 (строки 65-66)
+    from cryptocore.kdf.hkdf import hmac_sha256
+    key = b"test_key"
+    msg = b"test_message"
+    result = hmac_sha256(key, msg)
+    assert isinstance(result, bytes), "hmac_sha256 should return bytes"
+    assert len(result) == 32, "HMAC-SHA256 should be 32 bytes"
+    print("✓ hmac_sha256 function works")
+    
+    return True
+
+
 def main():
     """Запуск всех тестов HKDF."""
     print(" Запуск тестов HKDF ")
@@ -162,6 +209,9 @@ def main():
         all_passed = False
 
     if not test_hkdf_security():
+        all_passed = False
+
+    if not test_hkdf_error_handling():
         all_passed = False
 
     print("\n" + "=" * 60)

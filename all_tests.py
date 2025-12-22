@@ -98,10 +98,15 @@ def main():
         "test_hash.py",
         "test_hmac.py",
         "test_ecb.py",
+        "test_modes.py",  # Новый тест для CBC, CFB, OFB, CTR
+        "test_modes_base.py",  # Тест для базовых режимов (BlockCipherMode)
+        "test_file_io.py",  # Новый тест для file_io
+        "test_aead.py",  # Новый тест для aead
         "test_m2.py",
         "test_gcm.py",
         "test_cli.py",
-        "test_csprng.py"
+        "test_csprng.py",
+        "test_init.py",  # Тест для __init__.py
     ]
 
     print(" ЗАПУСК ВСЕХ ТЕСТОВ CRYPTOCORE")

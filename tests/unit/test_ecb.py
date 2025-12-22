@@ -1,10 +1,16 @@
 import os
 import sys
 import tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from src.cryptocore.modes.ecb import ECBCipher
-from src.cryptocore.file_io import read_file, write_file
-from src.cryptocore.cli import validate_key
+
+# Добавляем путь к src для импорта cryptocore
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
+from cryptocore.modes.ecb import ECBCipher
+from cryptocore.file_io import read_file, write_file
+from cryptocore.cli import validate_key
 
 
 def test_roundtrip_basic():
@@ -139,10 +145,48 @@ def test_openssl_compatibility():
                 os.unlink(f)
 
 
+def main():
+    """Запуск всех тестов ECB"""
+    all_passed = True
+    
+    try:
+        test_roundtrip_basic()
+    except Exception as e:
+        print(f"test_roundtrip_basic FAILED: {e}")
+        all_passed = False
+    
+    try:
+        test_roundtrip_file()
+    except Exception as e:
+        print(f"test_roundtrip_file FAILED: {e}")
+        all_passed = False
+    
+    try:
+        test_encrypt_decrypt_various_sizes()
+    except Exception as e:
+        print(f"test_encrypt_decrypt_various_sizes FAILED: {e}")
+        all_passed = False
+    
+    try:
+        test_validate_key()
+    except Exception as e:
+        print(f"test_validate_key FAILED: {e}")
+        all_passed = False
+    
+    try:
+        test_openssl_compatibility()
+    except Exception as e:
+        print(f"test_openssl_compatibility FAILED: {e}")
+        all_passed = False
+    
+    if all_passed:
+        print("ALL ECB TESTS PASSED!")
+        return True
+    else:
+        print("SOME ECB TESTS FAILED!")
+        return False
+
+
 if __name__ == "__main__":
-    test_roundtrip_basic()
-    test_roundtrip_file()
-    test_encrypt_decrypt_various_sizes()
-    test_validate_key()
-    test_openssl_compatibility()
-    print("ALL TESTS PASSED!")
+    success = main()
+    sys.exit(0 if success else 1)

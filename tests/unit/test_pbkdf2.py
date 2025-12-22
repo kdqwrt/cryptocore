@@ -3,8 +3,11 @@ import sys
 import os
 import time
 
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Добавляем путь к src для импорта cryptocore
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 from cryptocore.kdf.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2
 
@@ -160,9 +163,6 @@ def test_pbkdf2_functionality():
     return tests_passed == total_tests
 
 
-
-
-
 def test_interoperability_openssl():
     print("\n" + "=" * 60)
     print("Проверка совместимости с OpenSSL")
@@ -170,59 +170,201 @@ def test_interoperability_openssl():
 
     try:
         import subprocess
+        import binascii
         import tempfile
+        import os
+
+        # Проверяем наличие OpenSSL
+        result = subprocess.run(['openssl', 'version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print("✗ OpenSSL не найден")
+            return False
+
+        openssl_version = result.stdout.strip()
+        print(f"Используется: {openssl_version}")
 
         test_cases = [
             {
+                'name': 'Тест 1: Простая проверка',
                 'password': 'test',
-                'salt': '1234567890abcdef',
+                'salt_hex': '1234567890abcdef',
                 'iterations': 1000,
-                'length': 32
+                'dklen': 32,
+                'salt_bytes': binascii.unhexlify('1234567890abcdef')
             },
             {
+                'name': 'Тест 2: Длинный пароль',
                 'password': 'password123',
-                'salt': 'aabbccddeeff00112233445566778899',
+                'salt_hex': 'aabbccddeeff00112233445566778899',
                 'iterations': 5000,
-                'length': 16
+                'dklen': 16,
+                'salt_bytes': binascii.unhexlify('aabbccddeeff00112233445566778899')
             }
         ]
 
+        all_passed = True
+
         for i, test in enumerate(test_cases, 1):
-            # Получаем ключ нашей реализацией
-            our_key_hex = pbkdf2(
+            print(f"\n{test['name']}:")
+            print(f"  Пароль:    {test['password']}")
+            print(f"  Соль:      {test['salt_hex']}")
+            print(f"  Итерации:  {test['iterations']}")
+            print(f"  Длина:     {test['dklen']} байт")
+
+            # 1. Получаем ключ нашей реализацией
+            our_key = pbkdf2(
                 test['password'],
-                test['salt'],
+                test['salt_hex'],
                 test['iterations'],
-                test['length']
+                test['dklen']
             )
+            print(f"  Наш ключ:  {our_key}")
 
-            # Формируем команду OpenSSL
-            cmd = [
-                'openssl', 'kdf', '-keylen', str(test['length']),
-                '-kdfopt', f'pass:{test["password"]}',
-                '-kdfopt', f'salt:{test["salt"]}',
-                '-kdfopt', f'iter:{test["iterations"]}',
-                'PBKDF2'
-            ]
+            # 2. Получаем ключ через OpenSSL enc -pbkdf2
+            try:
+                # Создаем временный файл для пароля
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+                    f.write(test['password'])
+                    pass_file = f.name
 
-            # Запускаем OpenSSL
-            result = subprocess.run(cmd, capture_output=True, text=True)
+                # Команда OpenSSL (совместимая с реальным использованием)
+                cmd = (
+                    f'openssl enc -aes-256-cbc '
+                    f'-pass pass:{test["password"]} '
+                    f'-S {test["salt_hex"]} '
+                    f'-iter {test["iterations"]} '
+                    f'-pbkdf2 -P -md sha256'
+                )
 
-            if result.returncode == 0:
-                openssl_key = result.stdout.strip().replace(':', '')
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
-                if our_key_hex == openssl_key:
-                    print(f"✓ Тест {i}: Совместимость с OpenSSL подтверждена")
+                if result.returncode == 0:
+                    # Парсим вывод
+                    for line in result.stdout.split('\n'):
+                        if line.startswith('key='):
+                            openssl_key = line.split('=')[1].strip().lower()
+                            break
+                    else:
+                        openssl_key = None
+
+                    if openssl_key:
+                        print(f"  OpenSSL:   {openssl_key}")
+
+                        if our_key == openssl_key:
+                            print("  ✓ СОВПАДАЕТ С OPENSSL")
+                        else:
+                            print("  ✗ НЕ СОВПАДАЕТ С OPENSSL")
+                            all_passed = False
+                    else:
+                        print("  ✗ Не удалось получить ключ из OpenSSL")
+                        all_passed = False
                 else:
-                    print(f"✗ Тест {i}: Несовместимость с OpenSSL")
-                    print(f"  Наш ключ:    {our_key_hex}")
-                    print(f"  OpenSSL ключ: {openssl_key}")
-            else:
-                print(f"Тест {i}: OpenSSL не установлен или ошибка выполнения")
-                print(f"  Ошибка: {result.stderr}")
+                    print(f"  ✗ Ошибка OpenSSL: {result.stderr[:100]}")
+                    all_passed = False
+
+                # Удаляем временный файл
+                try:
+                    os.unlink(pass_file)
+                except:
+                    pass
+
+            except Exception as e:
+                print(f"  ✗ Ошибка выполнения: {e}")
+                all_passed = False
+
+        # 3. Проверка с тестовыми векторами OpenSSL
+        print("\n" + "-" * 60)
+        print("Проверка с известными тестами OpenSSL:")
+
+        # Известный тест: пароль "password", соль "salt", 1 итерация
+        test_vector = {
+            'password': 'password',
+            'salt_bytes': b'salt',
+            'iterations': 1,
+            'dklen': 32
+        }
+
+        print(f"\nТестовый вектор OpenSSL:")
+        print(f"  Пароль:    {test_vector['password']}")
+        print(f"  Соль:      {binascii.hexlify(test_vector['salt_bytes']).decode()}")
+        print(f"  Итерации:  {test_vector['iterations']}")
+
+        # Наш результат
+        our_key = pbkdf2(
+            test_vector['password'],
+            binascii.hexlify(test_vector['salt_bytes']).decode(),
+            test_vector['iterations'],
+            test_vector['dklen']
+        )
+        print(f"  Наш ключ:  {our_key}")
+
+        # Ожидаемый результат от OpenSSL (из RFC 6070 и проверенный)
+        expected_openssl = '120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b'
+        print(f"  Ожидаемый: {expected_openssl}")
+
+        if our_key == expected_openssl:
+            print("  ✓ НАША РЕАЛИЗАЦИЯ СООТВЕТСТВУЕТ OPENSSL/RFC 6070")
+        else:
+            print("  ✗ НАША РЕАЛИЗАЦИЯ НЕ СООТВЕТСТВУЕТ OPENSSL/RFC 6070")
+            all_passed = False
+
+        print("\n" + "=" * 60)
+        if all_passed:
+            print("✓ СОВМЕСТИМОСТЬ С OPENSSL ПОДТВЕРЖДЕНА")
+        else:
+            print("✗ ПРОБЛЕМЫ С СОВМЕСТИМОСТЬЮ OPENSSL")
+
+        return all_passed
 
     except Exception as e:
         print(f" Проверка OpenSSL пропущена: {e}")
+        return False
+
+
+def test_pbkdf2_error_handling():
+    """Тест обработки ошибок в PBKDF2"""
+    print("\n" + "=" * 60)
+    print("Тестирование обработки ошибок PBKDF2")
+    print("=" * 60)
+    
+    from cryptocore.kdf.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2
+    
+    password = b"password"
+    salt = b"salt"
+    
+    # Тест с dklen <= 0
+    try:
+        pbkdf2_hmac_sha256(password, salt, iterations=1, dklen=0)
+        assert False, "Should raise ValueError for dklen <= 0"
+    except ValueError as e:
+        assert "положительным" in str(e).lower() or "positive" in str(e).lower()
+        print("✓ ValueError raised for dklen <= 0")
+    
+    # Тест с iterations <= 0
+    try:
+        pbkdf2_hmac_sha256(password, salt, iterations=0, dklen=16)
+        assert False, "Should raise ValueError for iterations <= 0"
+    except ValueError as e:
+        assert "положительным" in str(e).lower() or "positive" in str(e).lower()
+        print("✓ ValueError raised for iterations <= 0")
+    
+    # Тест pbkdf2 с password как bytes (не строка)
+    result = pbkdf2(password, salt.hex(), iterations=1, dklen=16)
+    assert isinstance(result, str), "Should return hex string"
+    assert len(result) == 32, "Should return correct length (16 bytes = 32 hex chars)"
+    print("✓ pbkdf2 works with bytes password")
+    
+    # Тест pbkdf2 с salt_hex как bytes (не строка)
+    result = pbkdf2("password", salt, iterations=1, dklen=16)
+    assert isinstance(result, str), "Should return hex string"
+    print("✓ pbkdf2 works with bytes salt")
+    
+    # Тест pbkdf2 с salt_hex как строка (не hex)
+    result = pbkdf2("password", "not_hex_salt", iterations=1, dklen=16)
+    assert isinstance(result, str), "Should return hex string"
+    print("✓ pbkdf2 works with non-hex string salt")
+    
+    return True
 
 
 def main():
@@ -238,6 +380,8 @@ def main():
     if not test_pbkdf2_functionality():
         all_passed = False
 
+    if not test_pbkdf2_error_handling():
+        all_passed = False
 
     test_interoperability_openssl()
 
