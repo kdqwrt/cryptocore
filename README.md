@@ -65,6 +65,11 @@ cryptocore encrypt --mode gcm --decrypt --key @ключ --input данные.enc
 cryptocore encrypt --mode cbc --encrypt --key @ключ --input файл.txt --output файл.enc
 cryptocore encrypt --mode ctr --encrypt --key @ключ --input файл.txt --output файл.enc
 cryptocore encrypt --mode ecb --encrypt --key @ключ --input файл.txt --output файл.enc
+
+
+cryptocore encrypt --mode cbc --encrypt --key @00112233445566778899aabbccddeeff --input test.txt --output encrypted.bin
+cryptocore encrypt --mode cbc --decrypt --key @00112233445566778899aabbccddeeff --input encrypted.bin --output decrypted.txt
+
 ```
 Хеширование файлов
 ```bash
